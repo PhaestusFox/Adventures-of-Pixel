@@ -1,0 +1,8 @@
+[package]
+name = "adventures_of_pixel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.13"
+bevy_editor_pls = "*"
