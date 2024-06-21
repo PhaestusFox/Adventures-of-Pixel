@@ -1,4 +1,7 @@
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
+
+use crate::world::Kill;
 
 pub struct PixelPlugin;
 
@@ -7,9 +10,9 @@ const PIXEL_FRAME_TIME: f32 = 1. / 10.;
 impl Plugin for PixelPlugin {
     fn build(&self, app: &mut App) {
         app
+            .add_event::<PlayerEvent>()
             .add_systems(Startup, spawn_pixel)
-            .add_systems(Update, (idel_animate_pixel, walk_animate_pixel))
-            .add_systems(Update, walk);
+            .add_systems(Update, (flap, player_events, resets));
     }
 }
 
@@ -37,150 +40,99 @@ impl core::ops::Mul<f32> for Direction {
     }
 }
 
-fn idel_animate_pixel(
-    time: Res<Time>,
-    mut query: Query<&mut Transform>,
-    pixel: Query<&Children, With<PixelPlayer>>,
-    mut direction: Local<Direction>
-) {
-    let pixel = pixel.single();
-    let head = pixel[0];
-    let legs = pixel[1];
-    let Ok(mut head) = query.get_mut(head) else {error!("\"Pixel\" as no Head"); return;};
-    if head.translation.y > 2.5 {*direction = Direction::Down}
-    else if head.translation.y < -2.5 {*direction = Direction::Up}
-
-    head.translation += *direction * time.delta_seconds() * 2.;
-}
-
-fn walk_animate_pixel(
-    mut query: Query<(&mut Sprite, &mut TextureAtlas)>,
-    pixel: Query<(&Children, &PixelPlayer)>,
-    time: Res<Time>,
-    mut elapsed: Local<f32>,
-) {
-    *elapsed += time.delta_seconds();
-    if *elapsed < PIXEL_FRAME_TIME {return;}
-    *elapsed -= PIXEL_FRAME_TIME;
-    let pixel = pixel.single();
-    let head = pixel.0[0];
-    let legs = pixel.0[1];
-    let Ok((mut sprite, mut atlas) ) = query.get_mut(legs) else {error!("\"Pixel\" as no Head"); return;};
-    fn next_index(index: usize) -> usize {
-        ((index / 10) % 4 + 1)  * 10
-    }
-    match pixel.1 {
-        PixelPlayer::Idel => {
-            atlas.index = 0
-        },
-        PixelPlayer::WalkLeft => {
-            sprite.flip_x = true;
-            atlas.index = next_index(atlas.index);
-        },
-        PixelPlayer::WalkRight => {
-            sprite.flip_x = false;
-            atlas.index = next_index(atlas.index);
-        },
-    }
-}
-
-fn walk(
+fn flap(
+    mut player: Query<(&mut ExternalImpulse), With<PixelPlayer>>,
     input: Res<ButtonInput<KeyCode>>,
-    mut pixels: Query<(&mut Transform, &mut PixelPlayer), With<PixelPlayer>>,
+    mut residual: Local<f32>,
 ) {
-    for (mut transform, mut pixel) in &mut pixels {
-        let mut delta = 0.;
-        if input.any_just_released([KeyCode::ArrowLeft, KeyCode::AltRight, KeyCode::KeyA, KeyCode::KeyD]) {
-            *pixel = PixelPlayer::Idel;
+    for mut player in &mut player {
+        if input.pressed(KeyCode::KeyA) {
+            player.impulse.x -= 1.;
         }
-        for key in input.get_pressed() {
-            match key {   
-                KeyCode::ArrowLeft | KeyCode::KeyA => {
-                    delta = -1.;
-                    *pixel = PixelPlayer::WalkLeft;
-                },
-                KeyCode::ArrowRight | KeyCode::KeyD => {
-                    delta = 1.;
-                    *pixel = PixelPlayer::WalkRight;
-                },
-                _ => {}
-            }
+        if input.pressed(KeyCode::KeyD) {
+            player.impulse.x += 1.;
         }
-        transform.translation.x += delta * 2.;
+        if input.just_pressed(KeyCode::KeyW) {
+            player.impulse.y += 16.;
+            *residual = 8.;
+        } else if input.pressed(KeyCode::KeyW) {
+            player.impulse.y += *residual;
+            *residual *= 0.5;
+        }
+        if input.pressed(KeyCode::KeyS) {
+            player.impulse.y -= 0.5;
+        }
     }
 }
 
 fn spawn_pixel(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut atlas: ResMut<Assets<TextureAtlasLayout>>
+    mut meshs: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands
-        .spawn((SpatialBundle::default(), PixelPlayer::Idel))
-        .with_children(|p| {
-            p.spawn(SpriteSheetBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::splat(80.)),
-                    ..Default::default()
-                },
-                texture: asset_server.load("sheet_0.png"),
-                atlas: TextureAtlas {
-                    index: 1,
-                    layout: atlas.add(TextureAtlasLayout::from_grid(Vec2::splat(16.), 10, 10, None, None)),
-                },
-                transform: Transform::from_translation(Vec3::Z),
-                ..Default::default()
-            });
-            p.spawn(SpriteSheetBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::splat(80.)),
-                    ..Default::default()
-                },
-                texture: asset_server.load("sheet_0.png"),
-                atlas: TextureAtlas {
-                    index: 0,
-                    layout: atlas.add(TextureAtlasLayout::from_grid(Vec2::splat(16.), 10, 10, None, None)),
-                },
-                ..Default::default()
-            });
-            p.spawn(SpriteBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::splat(15.)),
-                    ..Default::default()
-                },
-                transform: Transform::from_translation(Vec3::new(15., 20., 2.)),
-                texture: asset_server.load("eye_0.png"),
-                ..Default::default()
-            }).with_children(|e| {
-                e.spawn(SpriteBundle {
-                    sprite: Sprite {
-                        custom_size: Some(Vec2::splat(3.32)),
-                        ..Default::default()
-                    },
-                    transform: Transform::from_translation(Vec3::new(-2., -3., 2.)),
-                    texture: asset_server.load("pupel.png"),
-                    ..Default::default()
-                });
-            });
-            p.spawn(SpriteBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::splat(15.)),
-                    ..Default::default()
-                },
-                transform: Transform::from_translation(Vec3::new(-15., 20., 2.)),
-                texture: asset_server.load("eye_0.png"),
-                ..Default::default()
-            }).with_children(|e| {
-                e.spawn(SpriteBundle {
-                    sprite: Sprite {
-                        custom_size: Some(Vec2::splat(3.42)),
-                        ..Default::default()
-                    },
-                    transform: Transform::from_translation(Vec3::new(1., -2., 2.)),
-                    texture: asset_server.load("pupel.png"),
-                    ..Default::default()
-                });
-            });
-            
-        });
+
+    commands.spawn((PbrBundle {
+        mesh: meshs.add(Cuboid::new(1., 1., 1.)),
+        material: mats.add(StandardMaterial{
+            base_color_texture: Some(asset_server.load("pixel.png")),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }, RigidBody::Dynamic,
+    ExternalImpulse::default(),
+    PixelPlayer::Idel,
+    Velocity::zero(),
+    Collider::cuboid(0.5, 0.5, 0.5),
+    GravityScale(5.),
+    Restitution::coefficient(0.5),
+    Damping {
+        linear_damping: 0.5,
+        angular_damping: 0.5,
+    },
+    CollidingEntities::default(),
+    ActiveEvents::all(),
+    LockedAxes::TRANSLATION_LOCKED_Z,
+    )).with_children(|p| {
+
+    });
+}
+
+#[derive(Event)]
+enum PlayerEvent {
+    Reset,
+}
+
+fn player_events(
+    mut query: Query<(&mut Transform, &mut Velocity), With<PixelPlayer>>,
+    mut events: EventReader<PlayerEvent>,
+) {
+    for event in events.read() {
+        match event {
+            PlayerEvent::Reset => {
+                for (mut pos, mut vel) in &mut query {
+                    *pos = Transform::IDENTITY;
+                    *vel = Velocity::zero();
+                }
+            },
+        }
+    }
+}
+
+fn resets(
+    mut player: EventWriter<PlayerEvent>,
+    input: Res<ButtonInput<KeyCode>>,
+    hits: Query<&CollidingEntities, With<PixelPlayer>>,
+    death: Query<(), With<Kill>>
+) {
+    if input.just_pressed(KeyCode::Space) {
+        player.send(PlayerEvent::Reset);
+    }
+    let hits = hits.single();
+    for hit in hits.iter() {
+        if death.contains(hit) {
+            player.send(PlayerEvent::Reset);
+            break;
+        }
+    }
 }

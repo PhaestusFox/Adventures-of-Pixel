@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 bevy = "0.13"
 bevy_editor_pls = "*"
+bevy_rapier3d = { version = "*", features = [ "simd-stable", "debug-render-3d" ] }
+rand = "*"
